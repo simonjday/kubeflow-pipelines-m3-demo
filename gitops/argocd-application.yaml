@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubeflow-pipelines
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # TODO: replace with this repo's actual URL once pushed (Gitea or GitHub)
+    repoURL: https://github.com/<your-org-or-user>/kubeflow-pipelines-m3-demo.git
+    targetRevision: main
+    path: platform-tools/kubeflow-pipeline
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubeflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
