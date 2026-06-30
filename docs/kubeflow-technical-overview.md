@@ -139,6 +139,15 @@ Given your stack (kind-devops-lab, ArgoCD + Gitea GitOps, Kyverno policy-as-code
 
 ## 8. End-to-end demo: Kubeflow Pipelines on a local M3 Mac (kind)
 
+> **This was the original design walkthrough.** It's kept here for the narrative explanation of *why* each step exists, but the actual tested, working files live in this repo and have since been fixed in ways this prose hadn't caught up with (a cert-manager dependency that was missing entirely, port collisions, an invalid Kustomize patch). If anything below ever conflicts with the repo itself, **the repo is the source of truth**, specifically:
+> - `kind/kind-cluster.yaml` — cluster config
+> - `platform-tools/kubeflow-pipeline/kustomization.yaml` — the actual, working KFP overlay
+> - `pipelines/pipeline.py` + `pipelines/components/` — the actual sample pipeline
+> - `argocd/bootstrap.sh` — ArgoCD install (use this instead of bootstrapping by hand)
+> - `gitops/argocd-application.yaml` — the real Application manifest, already pointed at this repo
+> - `scripts/cluster-stop.sh` / `scripts/cluster-resume.sh` — pause/resume the cluster between sessions
+> - `README.md` — the up-to-date, tested Quickstart and GitOps walkthrough
+
 This demo deploys **Kubeflow Pipelines standalone** (not the full reference platform) on a local `kind` cluster on your M3 MacBook Pro — the lightest path to a working KFP environment on Apple Silicon, avoiding the worst of the ARM64 image gaps that hit the full platform install.
 
 > **Known M-series gotcha:** several `kubeflownotebookswg` and Model Registry dependency images (e.g., certain MySQL tags) lack arm64 manifests and will `ImagePullBackOff` on kind/Minikube on Apple Silicon. KFP's core pods (`ml-pipeline`, `seaweedfs`, `mysql:8.0.26` as used below, `workflow-controller`) are multi-arch and install cleanly. If you later add the full platform or Model Registry, expect to patch image tags — this is exactly the kind of work Kubeflow's own GSoC 2026 "ARM Support" track is targeting.
@@ -193,7 +202,7 @@ kubectl wait --for=condition=established crd/applications.app.k8s.io --timeout=6
 
 ### 8.5 Patch and deploy KFP
 
-Create a local overlay (this is the same pattern as the DevOpsCube `mlops-for-devops` reference repo, adapted for kind instead of EKS):
+Create a local overlay (this is the same pattern as the DevOpsCube `mlops-for-devops` reference repo, adapted for kind instead of EKS — the version below is the **actual tested overlay**, also at `platform-tools/kubeflow-pipeline/kustomization.yaml` in this repo):
 
 ```yaml
 # kustomization.yaml
@@ -203,8 +212,42 @@ namespace: kubeflow
 
 resources:
   - github.com/kubeflow/pipelines/manifests/kustomize/env/platform-agnostic-emissary?ref=2.16.1
+  # Issuer + Certificate that issue the "webhook-server-tls" secret the
+  # cache-server pod mounts. Normally cache-deployer creates this via the
+  # Kubernetes CSR API; since we delete cache-deployer below (it needs CSR
+  # API access that managed clusters like EKS deny), this is its cert-manager
+  # replacement — without it, cache-server sits Pending/CrashLoop waiting on
+  # a secret that never gets created. (This was missed in earlier drafts of
+  # this overlay and caused exactly that failure — see the note below.)
+  - github.com/kubeflow/pipelines/manifests/kustomize/env/cert-manager/base?ref=2.16.1
 
 patches:
+  # Remove cache-deployer — it requires the Kubernetes CSR API, which is
+  # unavailable/restricted on managed clusters (EKS, OpenShift) and
+  # unnecessary on kind since cert-manager (installed above) issues the
+  # cache-server's TLS cert instead.
+  - patch: |
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: cache-deployer-deployment
+        namespace: kubeflow
+
+  # cache-server needs to be told to read the cert-manager-issued cert/key
+  # filenames (tls.crt/tls.key) instead of the cache-deployer-generated ones.
+  - target:
+      kind: Deployment
+      name: cache-server
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--tls_cert_filename=tls.crt"
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--tls_key_filename=tls.key"
+
+  # Expose the Pipelines UI on NodePort for local access via kind.
   - target:
       kind: Service
       name: ml-pipeline-ui
@@ -212,6 +255,13 @@ patches:
       - op: replace
         path: /spec/type
         value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+
+  # SeaweedFS runs as a non-root user by default and needs explicit write
+  # permission on its volume — without this it fails with:
+  #   "please verify /data is writable... permission denied"
   - target:
       kind: Deployment
       name: seaweedfs
@@ -223,12 +273,22 @@ patches:
           runAsUser: 1000
           runAsGroup: 1000
 
-# Remove cache-deployer; cert-manager issues the cache-server cert instead
-patchesStrategicMerge: []
-resources_to_remove:
-  - cache-deployer  # apply via a separate `kubectl delete` if your kustomize version
-                     # doesn't support component removal cleanly
+  # SeaweedFS's default NetworkPolicy only allows ingress from namespaces
+  # labeled app.kubernetes.io/part-of=kubeflow-profile or istio-system. A
+  # bare kind cluster without the profile controller/Istio has neither, so
+  # in-namespace pods (ml-pipeline, cache-server, persistence-agent) can't
+  # reach seaweedfs on port 8333 unless this policy is removed. Fine for
+  # local testing; for production use a properly scoped NetworkPolicy instead.
+  - patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: seaweedfs
+        namespace: kubeflow
 ```
+
+> **What this fixes that an earlier version of this doc got wrong:** an initial draft of this overlay deleted cache-deployer without supplying its cert-manager replacement, which left `cache-server` permanently `Pending` waiting on a `webhook-server-tls` secret that was never created. It also referenced deleting a `default-allow-same-namespace` NetworkPolicy that doesn't actually exist in the `platform-agnostic-emissary` base at this ref — `kustomize build` correctly refused with `no resource matches`. Both are fixed above; if you're troubleshooting a similar local install elsewhere, those two failure modes are worth knowing about specifically.
 
 ```bash
 kubectl apply -k .
@@ -246,8 +306,10 @@ kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
 
 ### 8.7 Author and run a pipeline from the KFP SDK
 
+The illustrative version below is a single-file simplification; the actual, modular version with an `evaluate` threshold gate lives in this repo at `pipelines/pipeline.py` and `pipelines/components/{preprocess,train,evaluate}.py` — run that one, not a copy-paste of this snippet.
+
 ```python
-# pipeline.py
+# pipeline.py (simplified — see pipelines/pipeline.py in this repo for the real version)
 from kfp import dsl, compiler, Client
 
 @dsl.component(base_image="python:3.11-slim")
@@ -289,9 +351,11 @@ python3 pipeline.py
 
 This compiles your Python DAG to IR YAML, submits it to the `ml-pipeline` API server, which creates an Argo Workflow CRD; the workflow controller schedules `system-dag-driver` → `system-container-driver` → `system-container-impl` pods per step, exactly as described in Section 4.3. Watch it execute live in the UI — each box in the graph is a real pod on your kind cluster.
 
+For real screenshots of the run graph and experiments list from an actual run on this overlay, and an explanation of task-level caching on re-run, see **"What the demo pipeline actually shows"** in `README.md`.
+
 ### 8.8 GitOps-ifying it (production pattern)
 
-For anything beyond this throwaway demo, point an ArgoCD `Application` at the same Kustomize overlay committed to Gitea instead of running `kubectl apply -k .` by hand:
+For anything beyond this throwaway demo, bootstrap ArgoCD into the cluster with `./argocd/bootstrap.sh` (this repo's script — see the README for the full walkthrough, including the cert-manager-must-already-be-installed prerequisite) and point an ArgoCD `Application` at the same Kustomize overlay, instead of running `kubectl apply -k .` by hand. The actual manifest, already pointed at this repo, lives at `gitops/argocd-application.yaml`:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -302,9 +366,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://gitea.internal/platform-tools/kubeflow-pipeline.git
+    repoURL: https://github.com/simonjday/kubeflow-pipelines-m3-demo.git
     targetRevision: main
-    path: .
+    path: platform-tools/kubeflow-pipeline
   destination:
     server: https://kubernetes.default.svc
     namespace: kubeflow
@@ -312,13 +376,19 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
 ```
+
+One gotcha worth flagging if you're checking sync status: Kubeflow Pipelines installs its own, unrelated `Application` CRD (`applications.app.k8s.io`), so a bare `kubectl get application kubeflow-pipelines` is ambiguous in this cluster — use `kubectl -n argocd get applications.argoproj.io kubeflow-pipelines` instead.
 
 ### 8.9 Teardown
 
 ```bash
 kind delete cluster --name kubeflow-demo
 ```
+
+For short gaps between sessions where you don't want to lose pipeline run history or ArgoCD sync state, use `scripts/cluster-stop.sh` / `scripts/cluster-resume.sh` instead — they stop/start the underlying Docker containers without destroying the cluster. See the README's "Pause / resume the cluster" section.
 
 ---
 
@@ -344,5 +414,7 @@ kind delete cluster --name kubeflow-demo
 18. ARM64 image issue tracker (kubeflow/manifests #2472) — https://github.com/kubeflow/manifests/issues/2472
 19. Apple Silicon KFP install field notes (Médéric Hurier / Fmind) — https://fmind.medium.com/how-to-install-kubeflow-on-apple-silicon-3565db8773f3
 20. Kubeflow M3 Pro install field notes (community gist) — https://gist.github.com/lokeshrangineni/5af4b30e5b1e65b3e028e2221b6d76ff
+21. This repo (canonical source for the tested overlay, pipeline, and scripts) — https://github.com/simonjday/kubeflow-pipelines-m3-demo
+22. ArgoCD official documentation — https://argo-cd.readthedocs.io/
 
 *Secondary/comparison sources (not official docs, used for the competitor matrix in Section 6): mlai.qa MLOps Platform Comparison 2026, ZenML "MLflow Alternatives" blog, buildmvpfast.com W&B/MLflow/Kubeflow comparison, KodeKloud "Top 11 MLOps Tools 2026", Valohai MLOps Platforms Compared.*

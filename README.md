@@ -4,6 +4,8 @@ Standalone Kubeflow Pipelines (KFP) deployment on a local `kind` cluster, built 
 
 Includes the same overlay pattern wrapped as an ArgoCD `Application` for teams running GitOps (ArgoCD + Gitea/GitHub) instead of `kubectl apply -k .` by hand.
 
+📄 **For the full architecture write-up — Kubeflow's subprojects, KFP internals, pros/cons, a competitor comparison (MLflow, SageMaker, Vertex AI, Flyte, etc.), and the original design rationale for this demo — see [`docs/kubeflow-technical-overview.md`](docs/kubeflow-technical-overview.md).** This README is the operational quickstart; that doc is the narrative explanation of *why*.
+
 ## Repo layout
 
 ```
