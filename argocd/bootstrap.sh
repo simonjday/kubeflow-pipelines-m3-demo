@@ -39,7 +39,13 @@ echo "==> Creating namespace '$ARGOCD_NAMESPACE' (if not present)"
 kubectl create namespace "$ARGOCD_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 echo "==> Installing ArgoCD ($ARGOCD_VERSION manifest) into '$ARGOCD_NAMESPACE'"
-kubectl apply -n "$ARGOCD_NAMESPACE" -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+# --server-side is required here: client-side `kubectl apply` stores the full
+# manifest in a kubectl.kubernetes.io/last-applied-configuration annotation,
+# and the applicationsets.argoproj.io CRD is large enough to blow past
+# Kubernetes' 262144-byte annotation limit ("Too long: may not be more than
+# 262144 bytes"). Server-side apply doesn't use that annotation at all.
+kubectl apply -n "$ARGOCD_NAMESPACE" --server-side --force-conflicts \
+  -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
 echo "==> Waiting for ArgoCD deployments to become available (this can take a few minutes on first pull)"
 kubectl -n "$ARGOCD_NAMESPACE" wait --for=condition=available --timeout=300s deployment --all
