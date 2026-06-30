@@ -4,10 +4,17 @@ namespace: kubeflow
 
 resources:
   - github.com/kubeflow/pipelines/manifests/kustomize/env/platform-agnostic-emissary?ref=2.16.1
+  # Issuer + Certificate that issue the "webhook-server-tls" secret the
+  # cache-server pod mounts. Normally cache-deployer creates this via the
+  # Kubernetes CSR API; since we delete cache-deployer below (it needs CSR
+  # API access that managed clusters like EKS deny), this is its cert-manager
+  # replacement — without it, cache-server sits Pending/CrashLoop waiting on
+  # a secret that never gets created.
+  - github.com/kubeflow/pipelines/manifests/kustomize/env/cert-manager/base?ref=2.16.1
 
 # Remove cache-deployer — it requires the Kubernetes CSR API, which is unavailable/
 # restricted on managed clusters (EKS, OpenShift) and unnecessary on kind since
-# cert-manager (installed separately) issues the cache-server's TLS cert instead.
+# cert-manager (installed above) issues the cache-server's TLS cert instead.
 patches:
   - patch: |
       $patch: delete
@@ -16,6 +23,19 @@ patches:
       metadata:
         name: cache-deployer-deployment
         namespace: kubeflow
+
+  # cache-server needs to be told to read the cert-manager-issued cert/key
+  # filenames (tls.crt/tls.key) instead of the cache-deployer-generated ones.
+  - target:
+      kind: Deployment
+      name: cache-server
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--tls_cert_filename=tls.crt"
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--tls_key_filename=tls.key"
 
   # Expose the Pipelines UI on NodePort for local access via kind.
   - target:

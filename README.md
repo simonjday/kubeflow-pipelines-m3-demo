@@ -66,6 +66,8 @@ python pipelines/pipeline.py
 
 ## GitOps path (ArgoCD, recommended over step 4 above)
 
+> **Prerequisite:** cert-manager (step 2 of Quickstart above) must already be installed in the cluster before ArgoCD syncs this overlay — the overlay now includes a cert-manager `Issuer`/`Certificate` (see `platform-tools/kubeflow-pipeline/kustomization.yaml`) that issues the cache-server's TLS secret, and `kustomize build` will fail on those CRD kinds if cert-manager isn't present yet. If you're doing the GitOps path from a fresh cluster, install cert-manager manually first (step 2), *then* bootstrap ArgoCD.
+
 Rather than running `kubectl apply -k platform-tools/kubeflow-pipeline` by hand every time, bootstrap ArgoCD into the same kind cluster and let it manage the KFP overlay declaratively.
 
 ### 1. Install ArgoCD into the cluster
