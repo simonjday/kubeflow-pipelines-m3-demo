@@ -64,6 +64,6 @@ echo "============================================================"
 echo " Cluster '$CLUSTER_NAME' is back up."
 echo
 echo " Re-open port-forwards as needed:"
-echo "   kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80"
-echo "   kubectl -n argocd port-forward svc/argocd-server 8443:443"
+echo "   kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80"
+echo "   kubectl -n argocd port-forward svc/argocd-server 8080:443"
 echo "============================================================"

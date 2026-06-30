@@ -240,8 +240,8 @@ Expect `ml-pipeline`, `ml-pipeline-ui`, `mysql`, `seaweedfs`, `cache-server`, `m
 ### 8.6 Access the UI
 
 ```bash
-kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
-# → http://localhost:8080/#/pipelines
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
+# → http://localhost:8090/#/pipelines
 ```
 
 ### 8.7 Author and run a pipeline from the KFP SDK
@@ -274,13 +274,13 @@ def demo_pipeline(raw_rows: int = 1000):
 if __name__ == "__main__":
     compiler.Compiler().compile(demo_pipeline, "pipeline.yaml")
 
-    client = Client(host="http://localhost:8080")
+    client = Client(host="http://localhost:8090")
     run = client.create_run_from_pipeline_package(
         "pipeline.yaml",
         arguments={"raw_rows": 2000},
         run_name="m3-demo-run-1",
     )
-    print(f"Run URL: http://localhost:8080/#/runs/details/{run.run_id}")
+    print(f"Run URL: http://localhost:8090/#/runs/details/{run.run_id}")
 ```
 
 ```bash

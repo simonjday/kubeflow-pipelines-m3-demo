@@ -5,7 +5,7 @@ Compiles a 3-step KFP pipeline (preprocess -> train -> evaluate) and submits
 it to a Kubeflow Pipelines instance reachable at KFP_ENDPOINT.
 
 Usage:
-    kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
+    kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
     python pipeline.py
 """
 import os
@@ -16,7 +16,7 @@ from components.preprocess import preprocess
 from components.train import train
 from components.evaluate import evaluate
 
-KFP_ENDPOINT = os.environ.get("KFP_ENDPOINT", "http://localhost:8080")
+KFP_ENDPOINT = os.environ.get("KFP_ENDPOINT", "http://localhost:8090")
 COMPILED_PATH = os.environ.get("COMPILED_PATH", "pipeline.yaml")
 
 

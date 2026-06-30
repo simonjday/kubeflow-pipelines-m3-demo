@@ -55,8 +55,8 @@ kubectl apply -k platform-tools/kubeflow-pipeline
 kubectl get pods -n kubeflow -w
 
 # 5. Access the UI
-kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
-# http://localhost:8080/#/pipelines
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
+# http://localhost:8090/#/pipelines
 
 # 6. Trigger the sample pipeline
 python3 -m venv .venv && source .venv/bin/activate
@@ -81,8 +81,8 @@ This installs the upstream ArgoCD manifests into the `argocd` namespace, waits f
 Log in via port-forward:
 
 ```bash
-kubectl -n argocd port-forward svc/argocd-server 8443:443
-# https://localhost:8443  (user: admin, password printed by bootstrap.sh)
+kubectl -n argocd port-forward svc/argocd-server 8080:443
+# https://localhost:8080  (user: admin, password printed by bootstrap.sh)
 ```
 
 ### 2. Point the Application at your repo
