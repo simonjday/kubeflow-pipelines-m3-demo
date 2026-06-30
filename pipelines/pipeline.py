@@ -6,7 +6,7 @@ it to a Kubeflow Pipelines instance reachable at KFP_ENDPOINT.
 
 Usage:
     kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
-    python pipeline.py
+    python3 pipeline.py
 """
 import os
 

@@ -61,7 +61,7 @@ kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8090:80
 # 6. Trigger the sample pipeline
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r pipelines/requirements.txt
-python pipelines/pipeline.py
+python3 pipelines/pipeline.py
 ```
 
 ## GitOps path (ArgoCD, recommended over step 4 above)
@@ -106,7 +106,10 @@ kubectl apply -f gitops/argocd-application.yaml
 ArgoCD will then sync `platform-tools/kubeflow-pipeline` into the `kubeflow` namespace and keep it in sync (auto-prune + self-heal are enabled in the Application spec). From here, changes to the Kustomize overlay are made via git commits, not `kubectl apply`.
 
 ```bash
-kubectl -n argocd get application kubeflow-pipelines
+# Use the fully-qualified resource name — Kubeflow Pipelines also installs its
+# own unrelated "Application" CRD (applications.app.k8s.io), so a bare
+# `kubectl get application` is ambiguous and may resolve to the wrong one.
+kubectl -n argocd get applications.argoproj.io kubeflow-pipelines
 ```
 
 ## Pause / resume the cluster (save resources when idle)

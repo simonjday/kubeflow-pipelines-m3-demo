@@ -284,7 +284,7 @@ if __name__ == "__main__":
 ```
 
 ```bash
-python pipeline.py
+python3 pipeline.py
 ```
 
 This compiles your Python DAG to IR YAML, submits it to the `ml-pipeline` API server, which creates an Argo Workflow CRD; the workflow controller schedules `system-dag-driver` → `system-container-driver` → `system-container-impl` pods per step, exactly as described in Section 4.3. Watch it execute live in the UI — each box in the graph is a real pod on your kind cluster.
