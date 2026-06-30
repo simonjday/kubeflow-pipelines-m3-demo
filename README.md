@@ -28,7 +28,11 @@ Includes the same overlay pattern wrapped as an ArgoCD `Application` for teams r
 │   ├── cluster-stop.sh            # stop kind containers to free CPU/RAM
 │   └── cluster-resume.sh          # bring the stopped cluster back up
 └── docs/
-    └── kubeflow-technical-overview.md
+    ├── kubeflow-technical-overview.md
+    └── images/
+        ├── kfp-run-graph.png       # real screenshot: run graph (preprocess → train → evaluate)
+        ├── kfp-experiments-list.png # real screenshot: experiments list
+        └── run-execution-flow.svg   # diagram: internal driver/impl pod execution (not screenshot-able)
 ```
 
 ## Prerequisites
@@ -63,6 +67,56 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r pipelines/requirements.txt
 python3 pipelines/pipeline.py
 ```
+
+## What the demo pipeline actually shows
+
+`pipelines/pipeline.py` defines and submits a deliberately trivial 3-step pipeline — the point isn't the ML, it's seeing the real KFP execution mechanics (Section 4 of `docs/kubeflow-technical-overview.md`) happen on your own cluster instead of reading about them.
+
+| Step | What it does | Default input → output |
+|---|---|---|
+| `preprocess` | Simulates dropping invalid rows from a raw dataset | `raw_rows=2000` → `clean_rows=1950` |
+| `train` | Simulates training, returns a fake accuracy that scales with row count | `clean_rows=1950` → `accuracy≈0.895` |
+| `evaluate` | Gates the result against a minimum accuracy threshold | `accuracy≈0.895`, `threshold=0.85` → `PASS` |
+
+Each step is a separate `@dsl.component`-decorated Python function with its own container image (`python:3.11-slim`). You never hand-write the DAG — Kubeflow infers the dependency chain `preprocess → train → evaluate` purely from the fact that `train(clean_rows=pre.output)` consumes `preprocess`'s return value, and `evaluate(accuracy=tr.output)` consumes `train`'s.
+
+### Run graph (KFP UI → Runs → m3-demo-run-1)
+
+![KFP run graph showing preprocess, train, and evaluate steps all completed successfully](docs/images/kfp-run-graph.png)
+
+Three nodes, top to bottom, each with a green checkmark once it completes. Click any node in the real UI to see its logs, inputs/outputs, and which pod it ran in.
+
+### Experiments list (KFP UI → Experiments)
+
+![KFP experiments list showing the Default experiment with a successful run](docs/images/kfp-experiments-list.png)
+
+`pipeline.py` doesn't set an explicit experiment name, so the run lands under the **Default** experiment (KFP auto-creates this and groups any run that doesn't specify one). If you want runs organized separately, pass `experiment_name=` to `create_run_from_pipeline_package` in `pipelines/pipeline.py`.
+
+### What happens behind the scenes when you run it
+
+```bash
+python3 pipelines/pipeline.py
+```
+
+The two screenshots above are what you *see*; this is what's actually happening underneath — the IR-compile → Argo-CRD → driver/impl-pod execution flow described in Section 4.3 of the technical overview:
+
+![Run execution flow: SDK compile, API server, Argo CRD, workflow controller, per-step driver and impl pods](docs/images/run-execution-flow.svg)
+
+This part isn't screenshot-able since the `system-dag-driver-*`, `system-container-driver-*`, and `system-container-impl-*` pods are created and torn down per step — but you can catch them mid-run with:
+
+```bash
+kubectl -n kubeflow get pods -w
+```
+
+### Try task-level caching
+
+Re-run the same pipeline a second time:
+
+```bash
+python3 pipelines/pipeline.py
+```
+
+In the run graph, `preprocess` and `train` should complete almost instantly with a cache icon instead of re-executing — that's the ML-Metadata-backed caching from Section 4.3, not a coincidence.
 
 ## GitOps path (ArgoCD, recommended over step 4 above)
 
