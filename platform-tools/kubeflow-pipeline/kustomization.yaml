@@ -43,13 +43,16 @@ patches:
           runAsUser: 1000
           runAsGroup: 1000
 
-  # Drop the default-deny-same-namespace NetworkPolicy so the UI is reachable
-  # from outside the namespace in a local/testing context. Do NOT do this in
-  # production — use an Ingress + proper NetworkPolicy instead.
+  # SeaweedFS's default NetworkPolicy only allows ingress from namespaces
+  # labeled app.kubernetes.io/part-of=kubeflow-profile or istio-system. A
+  # bare kind cluster without the profile controller/Istio has neither, so
+  # in-namespace pods (ml-pipeline, cache-server, persistence-agent) can't
+  # reach seaweedfs on port 8333 unless this policy is removed. Fine for
+  # local testing; for production use a properly scoped NetworkPolicy instead.
   - patch: |
       $patch: delete
       apiVersion: networking.k8s.io/v1
       kind: NetworkPolicy
       metadata:
-        name: default-allow-same-namespace
+        name: seaweedfs
         namespace: kubeflow
